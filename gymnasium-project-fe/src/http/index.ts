@@ -16,6 +16,18 @@ export interface Result<T = any> {
     data: T;
 }
 
+//认证失败统一处理：并发请求只提示一次、清空凭证并跳转登录页
+let authHandled = false;
+function handleAuthFail(msg: string) {
+    if (authHandled) return;
+    authHandled = true;
+    ElMessage.error(msg);
+    const store = userStore();
+    store.token = '';
+    localStorage.clear();
+    window.location.href = '/login';
+}
+
 class Http {
     //axios实例
     private instance: AxiosInstance;
@@ -51,9 +63,16 @@ class Http {
         this.instance.interceptors.response.use((res: AxiosResponse) => {
             // console.log(res.data)
             if (res.data.code != 200) {
+                // token 认证失败（后端统一返回 600）：只提示一次并跳转登录
+                if (res.data.code === 600) {
+                    handleAuthFail(res.data.msg || '登录已过期，请重新登录')
+                    return Promise.reject(res.data.msg || '登录已过期')
+                }
                 ElMessage.error(res.data.msg || '服务器出错!')
                 return Promise.reject(res.data.msg || '服务器出错')
             } else {
+                // 成功请求后复位，避免重新登录后再次认证失败被静默吞掉
+                authHandled = false
                 return res.data
             }
         }, (error) => {
@@ -67,7 +86,7 @@ class Http {
                         break
                     case 401:
                         error.data.msg = '未授权，请重新登录';
-                        ElMessage.error(error.data.msg)
+                        handleAuthFail(error.data.msg)
                         break
                     case 403:
                         error.data.msg = '拒绝访问';
